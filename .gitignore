@@ -1,0 +1,32 @@
+# --- secrets & runtime state (NEVER commit) ---
+.env
+bot.log
+bot.log.*
+state.json
+state.json.bak
+
+# private chat data: quotes, member names/ids, reading positions, vector store
+reader.db
+qdrant_data/
+chatmem_state.json
+chatmem_names.json
+
+# uploaded books/manga (copyright + size)
+reader_files/
+
+# --- python ---
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# --- legacy (pyrogram era) ---
+*.session
+*.session-journal
+
+# --- scratch ---
+vl_test2.txt
+*.tmp
+
+# claude code harness internals
+.claude/
