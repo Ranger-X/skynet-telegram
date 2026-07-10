@@ -1,10 +1,13 @@
 """Cut a message stream into dialogue windows — the unit of chat memory.
 
-A lone «лол» is useless as a retrieval chunk; a window of 10-15 consecutive messages carries the
-actual exchange. Windows close on a silence gap (a new «session»), on message count, or on size.
-Media inside a window stays as an attributed placeholder line («артём кинул трек: …») — real
+A lone "lol" is useless as a retrieval chunk; a window of 10-15 consecutive messages carries the
+actual exchange. Windows close on a silence gap (a new "session"), on message count, or on size.
+Media inside a window stays as an attributed placeholder line ("artem shared track: …") — real
 descriptions/transcripts arrive later from the grind pipeline as SEPARATE memory points, so
 windows never need re-embedding.
+
+The placeholders below are INDEX-INTERNAL (embedded, never shown to a user), so they are written in
+a single English form regardless of the chat's language.
 """
 
 import uuid
@@ -39,19 +42,19 @@ def render_line(m: ExportMessage) -> str:
     stamp = m.ts.strftime("%d.%m %H:%M")
     body = m.text or ""
     if m.kind == "photo":
-        body = f"[фото] {body}".strip()
+        body = f"[photo] {body}".strip()
     elif m.kind == "sticker":
-        body = f"[стикер {m.media_note}]".strip() if m.media_note else "[стикер]"
+        body = f"[sticker {m.media_note}]".strip() if m.media_note else "[sticker]"
     elif m.kind == "voice":
-        body = f"[голосовое {m.duration_s} с] {body}".strip()
+        body = f"[voice {m.duration_s}s] {body}".strip()
     elif m.kind == "video":
-        body = f"[видео] {body}".strip()
+        body = f"[video] {body}".strip()
     elif m.kind == "animation":
-        body = f"[гифка] {body}".strip()
+        body = f"[gif] {body}".strip()
     elif m.kind == "audio_file":
-        body = f"[кинул трек: {m.media_note}] {body}".strip()
+        body = f"[shared track: {m.media_note}] {body}".strip()
     elif m.kind == "file":
-        body = f"[файл: {m.media_note}] {body}".strip()
+        body = f"[file: {m.media_note}] {body}".strip()
     return f"[{stamp}] {m.author}: {body}"
 
 

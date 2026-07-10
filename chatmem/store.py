@@ -3,7 +3,7 @@
 Embedded Qdrant allows exactly one client per storage path per process, so this module deliberately
 borrows reader.store's client and lock instead of opening its own. Separate collection, same
 hybrid dense+sparse layout, RRF fusion. Payload filters: chat_id always, author optionally
-(the dossier axis), timestamp range optionally (the «что было вчера» axis).
+(the dossier axis), timestamp range optionally (the "what happened yesterday" axis).
 """
 
 import asyncio

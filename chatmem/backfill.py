@@ -17,6 +17,7 @@ import sys
 import time
 from collections.abc import Awaitable, Callable
 
+import i18n
 from reader import embedder
 
 from . import names, store
@@ -27,6 +28,26 @@ log = logging.getLogger("t800.chatmem")
 
 BATCH = 32
 
+# Progress / summary strings, selected by the chat's language.
+STR = {
+    "en": {
+        "parsed": "parsed {n} messages ({span}), windows: {win} (p50 {p50} chars). Embedding...",
+        "progress": "memory: {done}/{total} windows (~{secs}s left)",
+        "summary": (
+            "Chat archive ingested in {secs}s: {win} dialogue windows, "
+            "memory points total: {total}. Media ({media} items) will be digested separately."
+        ),
+    },
+    "ru": {
+        "parsed": "распарсено {n} сообщений ({span}), окон: {win} (p50 {p50} знаков). Эмбеддинг...",
+        "progress": "память: {done}/{total} окон (~{secs} с осталось)",
+        "summary": (
+            "Архив чата усвоен за {secs} с: {win} окон диалога, "
+            "всего точек памяти: {total}. Медиа ({media} шт.) будут дожёваны отдельно."
+        ),
+    },
+}
+
 
 async def run(
     export_dir: str,
@@ -34,6 +55,7 @@ async def run(
     progress: Callable[[str], Awaitable[None]] | None = None,
 ) -> str:
     """Returns a one-line human summary; optionally reports progress along the way."""
+    lang = i18n.get_lang(chat_id)
 
     async def tick(text: str) -> None:
         log.info("backfill: %s", text)
@@ -48,10 +70,9 @@ async def run(
     names.save_names(chat_id, {m.author_id: m.author for m in messages if m.author_id})
     windows = build_windows(messages, chat_id)
     sizes = sorted(len(w.text) for w in windows)
-    await tick(
-        f"распарсено {len(messages)} сообщений ({messages[0].ts:%d.%m} — {messages[-1].ts:%d.%m}), "
-        f"окон: {len(windows)} (p50 {sizes[len(sizes) // 2]} знаков). Эмбеддинг..."
-    )
+    span = f"{messages[0].ts:%d.%m} — {messages[-1].ts:%d.%m}"
+    await tick(i18n.L(lang, STR, "parsed", n=len(messages), span=span,
+                      win=len(windows), p50=sizes[len(sizes) // 2]))
 
     t0 = time.monotonic()
     last_tick = 0.0
@@ -63,14 +84,13 @@ async def run(
         rate = done / max(0.1, time.monotonic() - t0)
         if time.monotonic() - last_tick > 15:
             last_tick = time.monotonic()
-            await tick(f"память: {done}/{len(windows)} окон (~{int((len(windows) - done) / max(rate, 0.01))} с осталось)")
+            await tick(i18n.L(lang, STR, "progress", done=done, total=len(windows),
+                              secs=int((len(windows) - done) / max(rate, 0.01))))
 
     total = await store.count_points(chat_id)
-    summary = (
-        f"Архив чата усвоен за {time.monotonic() - t0:.0f} с: {len(windows)} окон диалога, "
-        f"всего точек памяти: {total}. Медиа ({sum(1 for m in messages if m.kind in ('photo', 'voice', 'video'))} шт.) "
-        f"будут дожёваны отдельно."
-    )
+    media = sum(1 for m in messages if m.kind in ("photo", "voice", "video"))
+    summary = i18n.L(lang, STR, "summary", secs=f"{time.monotonic() - t0:.0f}",
+                     win=len(windows), total=total, media=media)
     await tick(summary)
     return summary
 

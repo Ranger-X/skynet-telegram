@@ -100,7 +100,7 @@ def parse_fb2(data: bytes) -> ParsedDoc:
         for section in body.findall(f"{{{_FB2_NS}}}section"):
             _fb2_collect_sections(section, chapters)
 
-    return _finalize(title or "Без названия", author, chapters)
+    return _finalize(title or "Untitled", author, chapters)
 
 
 # --- EPUB ----------------------------------------------------------------------------------------
@@ -151,7 +151,7 @@ def parse_epub(data: bytes) -> ParsedDoc:
         if paragraphs:
             chapters.append(Chapter(title=ch_title, paragraphs=paragraphs))
 
-    return _finalize(title or "Без названия", author, chapters)
+    return _finalize(title or "Untitled", author, chapters)
 
 
 # --- shared finalization -------------------------------------------------------------------------
@@ -171,7 +171,7 @@ def _split_virtual(ch: Chapter, max_chars: int = VIRTUAL_SECTION_CHARS) -> list[
         size += len(p) + 1
     if buf:
         parts.append(Chapter(title="", paragraphs=buf))
-    base = ch.title or "Раздел"
+    base = ch.title or "Section"
     for i, part in enumerate(parts, 1):
         part.title = f"{base} ({i}/{len(parts)})"
     return parts
@@ -187,7 +187,7 @@ def _finalize(title: str, author: str, chapters: list[Chapter]) -> ParsedDoc:
     offset = 0
     for i, ch in enumerate(chapters):
         if not ch.title:
-            ch.title = f"Глава {i + 1}"
+            ch.title = f"Chapter {i + 1}"
         ch.start_offset = offset
         offset += len(ch.text)
         ch.end_offset = offset  # exclusive of the joint "\n" below
@@ -212,4 +212,4 @@ def parse_document(data: bytes, file_name: str) -> ParsedDoc:
             inner = next((n for n in z.namelist() if n.lower().endswith(".fb2")), None)
             if inner:
                 return parse_fb2(z.read(inner))
-    raise ValueError(f"Неподдерживаемый формат файла: {file_name} (жду .fb2, .fb2.zip или .epub)")
+    raise ValueError(f"Unsupported file format: {file_name} (expected .fb2, .fb2.zip or .epub)")

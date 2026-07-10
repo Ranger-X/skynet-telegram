@@ -15,8 +15,8 @@ class-annotated:
 
 Media classes seen in the wild: media_photo, media_voice_message, media_audio_file, media_video,
 media_file; stickers arrive as media_photo/media_video whose .title is literally "Sticker" (emoji
-in .status). Animations are .mp4 in video_files/. Video messages (кружки) are media_video with
-round thumbnails — distinguished by the "media_video" class + duration in .status.
+in .status). Animations are .mp4 in video_files/. Video messages (round "bubble" videos) are
+media_video with round thumbnails — distinguished by the "media_video" class + duration in .status.
 """
 
 import logging
@@ -93,7 +93,7 @@ def _classify_media(a_node) -> tuple[str, str, str, int]:
 
 _JSON_MEDIA_KIND = {
     "voice_message": "voice",
-    "video_message": "video",   # кружок
+    "video_message": "video",   # round "bubble" video message
     "video_file": "video",
     "animation": "animation",
     "sticker": "sticker",
@@ -149,7 +149,7 @@ def parse_result_json(json_path: Path) -> list[ExportMessage]:
 
         text = _json_text(m.get("text"))
         if m.get("forwarded_from"):
-            text = f"[переслал от {m['forwarded_from']}] {text}".strip()
+            text = f"[forwarded from {m['forwarded_from']}] {text}".strip()
 
         reply_to = m.get("reply_to_message_id")
         duration = int(m.get("duration_seconds") or 0)
@@ -159,7 +159,7 @@ def parse_result_json(json_path: Path) -> list[ExportMessage]:
         media_note = ""
         if m.get("photo"):
             # Keep the message even when the file wasn't downloaded ('(File not included...)') —
-            # the [фото] placeholder is dialogue signal; only media_path becomes None.
+            # the [photo] placeholder is dialogue signal; only media_path becomes None.
             kind, media_path = "photo", _json_media_path(m.get("photo"))
         elif m.get("media_type"):
             kind = _JSON_MEDIA_KIND.get(m["media_type"], "file")
@@ -244,7 +244,7 @@ def parse_export(export_dir: str | Path) -> list[ExportMessage]:
                 text = _clean(t)
                 break
             if fwd_from:
-                text = f"[переслал от {fwd_from}] {text}".strip()
+                text = f"[forwarded from {fwd_from}] {text}".strip()
 
             reply_to = None
             for r in node.find_class("reply_to"):

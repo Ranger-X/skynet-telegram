@@ -12,6 +12,8 @@ import logging
 import time
 from collections.abc import Awaitable, Callable
 
+import i18n
+
 from . import db, embedder, llm, rconfig, store
 from .chunking import Leaf, chunk_document
 from .parsing import ParsedDoc, parse_document
@@ -26,12 +28,47 @@ _embed_chunks_per_s = 0.6
 EMBED_BATCH = 32         # chunks per embed_texts call; progress ticks between calls
 PROGRESS_EVERY_S = 12    # min seconds between progress edits (Telegram flood limits)
 
-SUMMARY_PROMPT = (
-    "Ниже текст главы «{title}» из книги «{book}». Составь СЖАТУЮ сводку главы: ключевые события, "
-    "кто из персонажей что сделал, важные факты и изменения ситуации. Пиши связным текстом, "
-    "по-русски, без вступлений и без своих оценок. Не больше 8-10 предложений."
-    "\n\n{text}"
-)
+# Chapter-summary instruction to the LLM — bilingual, and it tells the model to write the summary
+# in the chat language. Selected by lang in run_ingest / run_manga_ingest.
+SUMMARY_PROMPT = {
+    "en": (
+        "Below is the text of the chapter \"{title}\" from the book \"{book}\". Write a CONCISE "
+        "summary of the chapter: key events, who did what, important facts and changes in the "
+        "situation. Write it as coherent prose, in English, with no preamble and no opinions of "
+        "your own. No more than 8-10 sentences."
+        "\n\n{text}"
+    ),
+    "ru": (
+        "Ниже текст главы «{title}» из книги «{book}». Составь СЖАТУЮ сводку главы: ключевые события, "
+        "кто из персонажей что сделал, важные факты и изменения ситуации. Пиши связным текстом, "
+        "по-русски, без вступлений и без своих оценок. Не больше 8-10 предложений."
+        "\n\n{text}"
+    ),
+}
+
+# User-facing ingest progress lines. Bilingual via i18n.L.
+STR = {
+    "en": {
+        "swallow_start": "Swallowing: {n} fragments, building the search index...",
+        "swallow_progress": "Swallowing: index {done}/{total} fragments...",
+        "summaries": "Building chapter summaries: {n}/{total} (of {all} chapters total, {eta} left)...",
+        "done": (
+            "Swallowed. Now set a bookmark — how far you've read: /pos chapter 5 or /pos 40%. "
+            "Then ask via /ask — I answer only from the part you've read, no spoilers."
+        ),
+        "ingest_failed": "Failure while swallowing the file: {exc}",
+    },
+    "ru": {
+        "swallow_start": "Проглатываю: {n} фрагментов, строю поисковый индекс...",
+        "swallow_progress": "Проглатываю: индекс {done}/{total} фрагментов...",
+        "summaries": "Строю сводки глав: {n}/{total} (всего глав {all}, осталось {eta})...",
+        "done": (
+            "Проглочено. Теперь поставь закладку — докуда дочитал: /pos глава 5 или /pos 40%. "
+            "Дальше спрашивай через /ask — отвечаю только по прочитанной тобой части, спойлеров не будет."
+        ),
+        "ingest_failed": "Сбой при поглощении файла: {exc}",
+    },
+}
 
 
 def estimate_tier_seconds(parsed: ParsedDoc, n_leaves: int, tier: str) -> int:
@@ -44,12 +81,14 @@ def estimate_tier_seconds(parsed: ParsedDoc, n_leaves: int, tier: str) -> int:
     return int(total)
 
 
-def eta_text(seconds: int) -> str:
+def eta_text(seconds: int, lang: str = "en") -> str:
     if seconds < 90:
-        return f"~{seconds} с"
+        return f"~{seconds} s" if lang == "en" else f"~{seconds} с"
     if seconds < 5400:
-        return f"~{max(1, round(seconds / 60))} мин"
-    return f"~{seconds / 3600:.1f} ч"
+        mins = max(1, round(seconds / 60))
+        return f"~{mins} min" if lang == "en" else f"~{mins} мин"
+    hours = seconds / 3600
+    return f"~{hours:.1f} h" if lang == "en" else f"~{hours:.1f} ч"
 
 
 async def run_ingest(
@@ -58,6 +97,7 @@ async def run_ingest(
     tier: str,
     job_id: int,
     progress: Callable[[str], Awaitable[None]],
+    lang: str = "en",
 ) -> None:
     """Full (or incremental) ingest of an already-parsed document. `progress` gets human-readable
     status lines, already throttled here."""
@@ -107,14 +147,14 @@ async def run_ingest(
             if n_skipped:
                 log.info("ingest resume: %d/%d chunks already stored", n_skipped, len(leaves))
 
-            await tick(f"Проглатываю: {len(leaves)} фрагментов, строю поисковый индекс...", force=True)
+            await tick(i18n.L(lang, STR, "swallow_start", n=len(leaves)), force=True)
             t0 = time.monotonic()
             for i in range(0, len(todo_leaves), EMBED_BATCH):
                 batch = todo_leaves[i : i + EMBED_BATCH]
                 embs = await embedder.embed_texts([l.text for l in batch])
                 await store.upsert_leaves(batch, embs)
                 done = n_skipped + min(i + EMBED_BATCH, len(todo_leaves))
-                await tick(f"Проглатываю: индекс {done}/{len(leaves)} фрагментов...")
+                await tick(i18n.L(lang, STR, "swallow_progress", done=done, total=len(leaves)))
             elapsed = time.monotonic() - t0
             if elapsed > 5 and todo_leaves:
                 _embed_chunks_per_s = max(0.05, len(todo_leaves) / elapsed)
@@ -135,19 +175,19 @@ async def run_ingest(
                     )
                     for c in remaining
                 )
-                return eta_text(int(secs))
+                return eta_text(int(secs), lang)
 
             for n, ch in enumerate(todo, 1):
                 ch_obj = parsed.chapters[ch["chapter_idx"]]
                 text = ch_obj.text[: rconfig.SUMMARY_INPUT_CHARS]
-                prompt = SUMMARY_PROMPT.format(title=ch_obj.title, book=parsed.title, text=text)
+                prompt = SUMMARY_PROMPT[lang].format(title=ch_obj.title, book=parsed.title, text=text)
                 # force=True: these ticks are minutes apart by nature (one summary ≈ 4-5 min on this
                 # box), so the throttle only hurts — without force the FIRST one lands right after
-                # the last embed tick and gets swallowed, leaving the message frozen on "индекс
-                # N/N" for the whole first summary (seen live).
+                # the last embed tick and gets swallowed, leaving the message frozen on the
+                # "index N/N" line for the whole first summary (seen live).
                 await tick(
-                    f"Строю сводки глав: {n}/{len(todo)} (всего глав {n_all}, осталось "
-                    f"{_summaries_eta(todo[n - 1:])})...",
+                    i18n.L(lang, STR, "summaries", n=n, total=len(todo), all=n_all,
+                           eta=_summaries_eta(todo[n - 1:])),
                     force=True,
                 )
                 # Contention protocol: never fire while the user is mid-conversation, and never
@@ -181,17 +221,13 @@ async def run_ingest(
 
         db.set_doc_status(doc_id, "ready")
         db.update_job(job_id, stage="done", status="done")
-        await tick(
-            "Проглочено. Теперь поставь закладку — докуда дочитал: /pos глава 5 или /pos 40%. "
-            "Дальше спрашивай через /ask — отвечаю только по прочитанной тобой части, спойлеров не будет.",
-            force=True,
-        )
+        await tick(i18n.L(lang, STR, "done"), force=True)
     except Exception as exc:
         log.exception("ingest failed for %s", doc_id[:12])
         db.set_doc_status(doc_id, "error", error=str(exc))
         db.update_job(job_id, stage="error", status="error", error=str(exc))
         try:
-            await progress(f"Сбой при поглощении файла: {exc}")
+            await progress(i18n.L(lang, STR, "ingest_failed", exc=exc))
         except Exception:
             pass
 

@@ -1,67 +1,70 @@
 # skynet-telegram
 
-Telegram-бот, отыгрывающий T-800 в групповом чате друзей — и постепенно обросший локальным
-LLM-стеком, который не должен помещаться в игровой ноутбук, но помещается:
+A Telegram bot that role-plays the T-800 in a group chat with friends — and gradually grew a local
+LLM stack that has no business fitting on a gaming laptop, yet does:
 
-- **Персона-чат** на локальной Gemma 4 12B (llama.cpp, CPU) с фолбэком на бесплатные модели
-  OpenRouter: подколки, реакции, провокационные тейки, новости, веб-поиск, досье на участников.
-- **Нативная мультимодальность**: фото, альбомы, голосовые, гифки, видео, кружки, стикеры — одна
-  модель, один движок.
-- **Лонг-ридер**: RAG по книгам (FB2/EPUB) со **спойлер-фильтром** — бот отвечает только по
-  прочитанной тобой части книги, заглянуть вперёд физически не может (`/pos`, `/ask`).
-- **Манга/комиксы** (CBZ/CBR/PDF): страницы читает vision-модель (реплики из баблов + сцены),
-  дальше это тот же RAG со спойлер-фильтром по страницам.
-- **Память чата**: вся история переписки (экспорт Telegram Desktop) в векторном индексе — бот сам
-  вспоминает на «а помнишь...», `/recall` отвечает «кто, что и когда» со ссылками на оригинальные
-  сообщения, `/profile` строит досье по всей истории человека.
-- **Deep research** (`/research`): многоугловой веб-поиск + разбор источников + вердикт со ссылками
-  — для споров в чате.
+- **Persona chat** on a local Gemma 4 12B (llama.cpp, CPU) with a fallback to free OpenRouter
+  models: jabs, reactions, provocative takes, news, web search, dossiers on chat members.
+- **Native multimodality**: photos, albums, voice messages, GIFs, video, video notes, stickers — one
+  model, one engine.
+- **Long-reader**: RAG over books (FB2/EPUB) with a **spoiler filter** — the bot answers only from
+  the part of the book you have actually read; it physically cannot peek ahead (`/pos`, `/ask`).
+- **Manga/comics** (CBZ/CBR/PDF): a vision model reads the pages (lines from speech bubbles + scenes),
+  and from there it is the same page-based, spoiler-filtered RAG.
+- **Chat memory**: the entire message history (Telegram Desktop export) in a vector index — the bot
+  recalls on its own when you say "remember when...", `/recall` answers "who, what and when" with
+  links back to the original messages, and `/profile` builds a dossier from a person's whole history.
+- **Deep research** (`/research`): multi-angle web search + source analysis + a verdict with
+  citations — for settling group-chat arguments.
 
-## Раскладка моделей (ноутбук: Ryzen 5600H, 16 ГБ RAM, RTX 3050 4 ГБ)
+## Model layout (laptop: Ryzen 5600H, 16 GB RAM, RTX 3050 4 GB)
 
-| Работа | Модель | Железо |
+| Job | Model | Hardware |
 |---|---|---|
-| Персона, ответы, сводки глав | Gemma 4 12B Q4 (heretic) | CPU, llama.cpp, KV q8_0 + FA |
-| Массовое чтение картинок/манги | Qwen3-VL-4B Q4 | GPU целиком (CUDA-сборка), порт 8081 |
-| Массовая транскрипция голосовых | faster-whisper small int8 | CPU |
-| Эмбеддинги (книги, чат) | bge-m3 fp16 | CPU, резидентно |
-| Реранкер | bge-reranker-v2-m3 | CPU, лениво под RAM-гардом |
-| Векторный стор | Qdrant embedded | диск, без сервера |
+| Persona, replies, chapter summaries | Gemma 4 12B Q4 (heretic) | CPU, llama.cpp, KV q8_0 + FA |
+| Bulk image/manga reading | Qwen3-VL-4B Q4 | whole GPU (CUDA build), port 8081 |
+| Bulk voice transcription | faster-whisper small int8 | CPU |
+| Embeddings (books, chat) | bge-m3 fp16 | CPU, resident |
+| Reranker | bge-reranker-v2-m3 | CPU, lazily under a RAM guard |
+| Vector store | Qdrant embedded | disk, no server |
 
-Обе LLM работают **одновременно** (у каждой своё железо). Вижн-грайндер опционален: без него
-батчи картинок вежливо падают на основную модель.
+Both LLMs run **simultaneously** (each on its own hardware). The vision grinder is optional: without
+it, image batches fall back gracefully to the main model.
 
-## Установка
+## Installation
 
 1. **Python 3.13+**, `python -m venv .venv`, `pip install -r requirements.txt`.
-2. **llama.cpp**: обычная сборка для персоны; CUDA-сборка — если хотите GPU-грайндер.
-3. **Модели**: GGUF Gemma 4 12B (Q4_K_M) + **официальный bf16 mmproj** (сторонние F16-экспорты
-   проектора дают мусор); опционально Qwen3-VL-4B GGUF+mmproj для грайндера.
-4. **Инструменты**: полный ffmpeg (pip-сборке не хватает фильтров), 7-Zip (для CBR).
-5. `cp .env.example .env`, заполнить токены и пути.
-6. Запуск: `toggle-bot.cmd` (поднимает llama-server + бота; повторный запуск — гасит),
-   `toggle-grinder.cmd` — отдельный тумблер GPU-грайндера (глушите перед играми — VRAM общая).
+2. **llama.cpp**: a regular build for the persona; a CUDA build if you want the GPU grinder.
+3. **Models**: GGUF Gemma 4 12B (Q4_K_M) + the **official bf16 mmproj** (third-party F16 projector
+   exports produce garbage); optionally Qwen3-VL-4B GGUF + mmproj for the grinder.
+4. **Tools**: a full ffmpeg (the pip build is missing filters), 7-Zip (for CBR).
+5. `cp .env.example .env`, fill in the tokens and paths.
+6. Run: `toggle-bot.cmd` (brings up llama-server + the bot; run it again to shut them down),
+   `toggle-grinder.cmd` — a separate switch for the GPU grinder (shut it down before gaming — VRAM
+   is shared).
 
-Первый запуск скачает bge-m3 (~2.3 ГБ) и, при использовании, whisper (~0.5 ГБ) с HuggingFace.
+The first run downloads bge-m3 (~2.3 GB) and, if used, whisper (~0.5 GB) from HuggingFace.
 
-## Команды
+## Commands
 
-**Чат:** `/tease` `/react` `/horn` `/new` `/search` `/research` `/profile` `/time` `/help`
-**Книги/манга:** прислать файл → выбор глубины анализа → `/pos` (закладка) → `/ask`, `/chapters`,
+**Chat:** `/tease` `/react` `/horn` `/new` `/search` `/research` `/profile` `/time` `/help`
+**Books/manga:** send a file → pick the analysis depth → `/pos` (bookmark) → `/ask`, `/chapters`,
 `/books`, `/book`, `/tier`
-**Память чата:** `/recall`, `/memstat`; владельцу — `/memload`, `/memgrind`, `/memwipe`
+**Chat memory:** `/recall`, `/memstat`; owner-only — `/memload`, `/memgrind`, `/memwipe`
+**Language:** `/lang en|ru` — switch the bot's language for this chat (English by default, per-chat).
 
-## Архитектурные заметки
+## Architecture notes
 
-- `long-reader-architecture.md` — бриф RAG-модуля с секцией поправок под реальное железо
-  (замеренные скорости, бюджеты контекста, почему prefill на CPU — не бесплатный).
-- `HABR_DRAFT.md` — черновик статьи со всей историей разработки: сага про зрение Gemma 4,
-  KV-квантование, RAM-гарды, бенч «4B читает лучше 12B» и прочие грабли с моралями.
+- `long-reader-architecture.md` — the RAG module brief, with a section of corrections for the real
+  hardware (measured speeds, context budgets, why prefill on CPU is not free).
+- `HABR_DRAFT.md` — a draft article covering the whole development story: the saga of Gemma 4's
+  vision, KV quantization, RAM guards, the "4B reads better than 12B" benchmark, and the other
+  pitfalls, with the lessons they taught.
 
-Приватные данные (токены, история чата, позиции чтения, книги) живут в `.env`, `state.json`,
-`reader.db`, `qdrant_data/`, `reader_files/`, `chatmem_*.json` — всё это в `.gitignore` и в
-репозиторий не попадает.
+Private data (tokens, chat history, reading positions, books) lives in `.env`, `state.json`,
+`reader.db`, `qdrant_data/`, `reader_files/`, `chatmem_*.json` — all of it is in `.gitignore` and
+never reaches the repository.
 
-## Лицензия
+## License
 
 MIT.

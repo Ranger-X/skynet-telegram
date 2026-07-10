@@ -9,6 +9,8 @@ import logging
 import time
 from collections.abc import Awaitable, Callable
 
+import i18n
+
 from . import db, embedder, grinder, llm, manga, rconfig, store
 from .chunking import Leaf
 from .ingest import SUMMARY_PROMPT, eta_text
@@ -18,6 +20,34 @@ log = logging.getLogger("t800.reader")
 
 # Measured seconds per page describe; prior for the 12B path, self-corrects after each run.
 _sec_per_page = 45.0
+
+# User-facing manga-ingest progress lines. Bilingual via i18n.L.
+STR = {
+    "en": {
+        "reading_start": "Reading \"{title}\": {n} pages{skipped}, will take ~{eta}...",
+        "already_read": " ({n} already read)",
+        "reading_progress": "Reading: page {done}/{total} ({failed} failed), {eta} left...",
+        "estimating_rate": "estimating the pace",
+        "summaries": "Building chapter summaries: {n}/{total}...",
+        "done": (
+            "\"{title}\" has been read ({described} pages absorbed, {failed} failures). "
+            "Set a bookmark: /pos page 30 or /pos chapter 2 — then ask via /ask. No spoilers."
+        ),
+        "read_failed": "Failure while reading the comic: {exc}",
+    },
+    "ru": {
+        "reading_start": "Читаю «{title}»: {n} страниц{skipped}, займёт ~{eta}...",
+        "already_read": " (уже прочитано {n})",
+        "reading_progress": "Читаю: стр. {done}/{total} (ошибок {failed}), осталось {eta}...",
+        "estimating_rate": "оцениваю темп",
+        "summaries": "Строю сводки глав: {n}/{total}...",
+        "done": (
+            "«{title}» прочитана ({described} страниц усвоено, {failed} сбоев). "
+            "Поставь закладку: /pos страница 30 или /pos глава 2 — и спрашивай через /ask. Спойлеров не будет."
+        ),
+        "read_failed": "Сбой чтения комикса: {exc}",
+    },
+}
 
 
 def estimate_manga_seconds(doc: MangaDoc, tier: str, pages_left: int | None = None) -> int:
@@ -41,6 +71,7 @@ async def run_manga_ingest(
     tier: str,
     job_id: int,
     progress: Callable[[str], Awaitable[None]],
+    lang: str = "en",
 ) -> None:
     global _sec_per_page
     last_edit = 0.0
@@ -76,10 +107,10 @@ async def run_manga_ingest(
         done_ids = await store.existing_chunk_ids(doc_id)
         todo = [p for p in range(1, mdoc.n_pages + 1) if _page_chunk_id(doc_id, p) not in done_ids]
         n_skipped = mdoc.n_pages - len(todo)
+        skipped = i18n.L(lang, STR, "already_read", n=n_skipped) if n_skipped else ""
         await tick(
-            f"Читаю «{mdoc.title}»: {len(todo)} страниц"
-            + (f" (уже прочитано {n_skipped})" if n_skipped else "")
-            + f", займёт ~{eta_text(int(len(todo) * _sec_per_page))}...",
+            i18n.L(lang, STR, "reading_start", title=mdoc.title, n=len(todo),
+                   skipped=skipped, eta=eta_text(int(len(todo) * _sec_per_page), lang)),
             force=True,
         )
 
@@ -95,7 +126,9 @@ async def run_manga_ingest(
                 ch = chapter_of(page)
                 leaf = Leaf(
                     chunk_id=_page_chunk_id(doc_id, page), parent_id="", doc_id=doc_id,
-                    text=f"[стр. {page}]\n{text}", offset=page, start_offset=page,
+                    # Index-internal page marker (embedded + fed to the model as context, never
+                    # shown verbatim) — English single version per the i18n contract.
+                    text=f"[page {page}]\n{text}", offset=page, start_offset=page,
                     chapter_idx=ch["chapter_idx"], chapter_title=ch["title"],
                 )
                 embs = await embedder.embed_texts([leaf.text])
@@ -107,8 +140,12 @@ async def run_manga_ingest(
 
             done_total = n_skipped + described
             rate = described / max(1.0, time.monotonic() - t0)
-            eta = eta_text(int((len(todo) - described - failed) / max(rate, 0.001))) if described else "оцениваю темп"
-            await tick(f"Читаю: стр. {done_total}/{mdoc.n_pages} (ошибок {failed}), осталось {eta}...")
+            eta = (
+                eta_text(int((len(todo) - described - failed) / max(rate, 0.001)), lang)
+                if described else i18n.L(lang, STR, "estimating_rate")
+            )
+            await tick(i18n.L(lang, STR, "reading_progress", done=done_total,
+                              total=mdoc.n_pages, failed=failed, eta=eta))
 
         if described > 3:
             _sec_per_page = max(3.0, (time.monotonic() - t0) / described)
@@ -122,8 +159,8 @@ async def run_manga_ingest(
                 if not page_texts:
                     continue
                 body = "\n\n".join(page_texts)[: rconfig.SUMMARY_INPUT_CHARS]
-                prompt = SUMMARY_PROMPT.format(title=ch["title"], book=mdoc.title, text=body)
-                await tick(f"Строю сводки глав: {n}/{len(todo_ch)}...", force=True)
+                prompt = SUMMARY_PROMPT[lang].format(title=ch["title"], book=mdoc.title, text=body)
+                await tick(i18n.L(lang, STR, "summaries", n=n, total=len(todo_ch)), force=True)
                 await llm.wait_for_quiet()
                 async with llm.llm_lock:
                     try:
@@ -147,8 +184,7 @@ async def run_manga_ingest(
         db.set_doc_status(doc_id, "ready")
         db.update_job(job_id, stage="done", status="done")
         await tick(
-            f"«{mdoc.title}» прочитана ({described} страниц усвоено, {failed} сбоев). "
-            "Поставь закладку: /pos страница 30 или /pos глава 2 — и спрашивай через /ask. Спойлеров не будет.",
+            i18n.L(lang, STR, "done", title=mdoc.title, described=described, failed=failed),
             force=True,
         )
         log.info("manga ingest done: %s, %d described, %d failed", doc_id[:12], described, failed)
@@ -157,6 +193,6 @@ async def run_manga_ingest(
         db.set_doc_status(doc_id, "error", error=str(exc))
         db.update_job(job_id, stage="error", status="error", error=str(exc))
         try:
-            await progress(f"Сбой чтения комикса: {exc}")
+            await progress(i18n.L(lang, STR, "read_failed", exc=exc))
         except Exception:
             pass

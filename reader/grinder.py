@@ -18,12 +18,15 @@ log = logging.getLogger("t800.reader")
 
 GRINDER_CHAT_URL = os.environ.get("GRINDER_CHAT_URL", "").strip()
 
+# Vision-model instruction feeding a MULTILINGUAL embedder — kept English, single version (the
+# describe output is embedded and retrieved, never shown verbatim to the user).
 MANGA_PAGE_PROMPT = (
-    "Это страница манги/комикса. Сначала выпиши реплики и надписи из баблов и рамок в порядке "
-    "чтения (манга читается справа налево, сверху вниз), каждую с новой строки в формате «— текст». "
-    "Звуковые эффекты, японские иероглифы и повторяющиеся выкрики НЕ выписывай — только осмысленный "
-    "текст, каждый бабл один раз. Затем с новой строки после метки «Сцена:» опиши в одном-двух "
-    "предложениях, что происходит на панелях. Если текста нет — только «Сцена:». Ничего не выдумывай."
+    "This is a manga/comic page. First, transcribe the dialogue and captions from the speech "
+    "bubbles and boxes in reading order (manga reads right to left, top to bottom), each on its "
+    "own line in the format \"— text\". Do NOT transcribe sound effects, Japanese characters, or "
+    "repeated shouts — only meaningful text, each bubble once. Then, on a new line after the label "
+    "\"Scene:\", describe in one or two sentences what is happening in the panels. If there is no "
+    "text — just \"Scene:\". Do not make anything up."
 )
 
 
@@ -49,9 +52,9 @@ async def describe_image(jpeg: bytes, prompt: str, max_tokens: int = 350, timeou
         }],
         "stream": False,
         "max_tokens": max_tokens,
-        # Small VLMs degenerate into «КАК! КАК! КАК!» loops on sound-effect/sparse pages (seen on
-        # the GitS bench with BOTH Qwen-4B and the 12B); a firm repeat penalty kills the loop
-        # without touching normal dialogue.
+        # Small VLMs degenerate into repeated sound-effect loops (e.g. "KAK! KAK! KAK!") on
+        # sparse/sound-effect pages (seen on the GitS bench with BOTH Qwen-4B and the 12B); a firm
+        # repeat penalty kills the loop without touching normal dialogue.
         "repeat_penalty": 1.25,
         "chat_template_kwargs": {"enable_thinking": False},
     }

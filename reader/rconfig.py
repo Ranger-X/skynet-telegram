@@ -28,7 +28,7 @@ CHARS_PER_TOKEN = 3.2
 CONTEXT_TOKENS = int(os.environ.get("READER_CONTEXT_TOKENS", "2200"))     # retrieved parents, total
 ANSWER_MAX_TOKENS = int(os.environ.get("READER_ANSWER_MAX_TOKENS", "300"))
 # Global questions (plot retellings over chapter summaries) legitimately need longer answers —
-# a 300-token cap cut a live «расскажи сюжет» mid-word. ~2 min of decode at measured speeds.
+# a 300-token cap cut a live "tell me the plot" mid-word. ~2 min of decode at measured speeds.
 ANSWER_MAX_TOKENS_GLOBAL = int(os.environ.get("READER_ANSWER_MAX_TOKENS_GLOBAL", "550"))
 
 # Retrieval.

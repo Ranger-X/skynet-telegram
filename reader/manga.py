@@ -79,14 +79,14 @@ def _chapters_from_names(names: list[str]) -> list[MangaChapter]:
     if len(groups) > 1:
         page = 1
         for folder, count in groups:
-            chapters.append(MangaChapter(title=folder or "Без раздела", first_page=page, last_page=page + count - 1))
+            chapters.append(MangaChapter(title=folder or "Untitled section", first_page=page, last_page=page + count - 1))
             page += count
         return chapters
 
     total = len(names)
     for start in range(1, total + 1, VIRTUAL_CHAPTER_PAGES):
         end = min(start + VIRTUAL_CHAPTER_PAGES - 1, total)
-        chapters.append(MangaChapter(title=f"Страницы {start}–{end}", first_page=start, last_page=end))
+        chapters.append(MangaChapter(title=f"Pages {start}–{end}", first_page=start, last_page=end))
     return chapters
 
 
@@ -105,7 +105,7 @@ def _cbr_page_names(path: str) -> list[str]:
             capture_output=True, text=True,
         )
         if proc.returncode != 0:
-            raise ValueError(f"7-Zip не смог распаковать CBR: {proc.stderr[:200]}")
+            raise ValueError(f"7-Zip could not extract the CBR: {proc.stderr[:200]}")
     names = [
         p.relative_to(cache).as_posix()
         for p in cache.rglob("*")
@@ -120,13 +120,13 @@ def open_manga(path: str, file_name: str) -> MangaDoc:
     if name.endswith(".cbz"):
         pages = _cbz_page_names(path)
         if not pages:
-            raise ValueError("в CBZ не нашлось ни одной страницы-изображения")
+            raise ValueError("No image pages found in the CBZ.")
         return MangaDoc(title=title, n_pages=len(pages), chapters=_chapters_from_names(pages),
                         fmt="cbz", source_path=path)
     if name.endswith(".cbr"):
         pages = _cbr_page_names(path)
         if not pages:
-            raise ValueError("в CBR не нашлось ни одной страницы-изображения")
+            raise ValueError("No image pages found in the CBR.")
         return MangaDoc(title=title, n_pages=len(pages), chapters=_chapters_from_names(pages),
                         fmt="cbr", source_path=path)
     if name.endswith(".pdf"):
@@ -139,11 +139,11 @@ def open_manga(path: str, file_name: str) -> MangaDoc:
             text_chars = sum(len(doc[i].get_text()) for i in range(min(5, n)))
             if text_chars > 500:
                 raise ValueError(
-                    "этот PDF — текстовый (книга), а не комикс; текстовые PDF пока не поддерживаются"
+                    "This PDF is text (a book), not a comic; text PDFs aren't supported yet."
                 )
         chapters = _chapters_from_names([f"p{i:05d}" for i in range(n)])  # always virtual for PDF
         return MangaDoc(title=title, n_pages=n, chapters=chapters, fmt="pdf", source_path=path)
-    raise ValueError(f"не манга/комикс: {file_name} (жду .cbz или .pdf)")
+    raise ValueError(f"Not a manga/comic: {file_name} (expected .cbz or .pdf)")
 
 
 def page_jpeg(doc: MangaDoc, page_idx: int) -> bytes:

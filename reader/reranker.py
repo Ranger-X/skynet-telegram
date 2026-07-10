@@ -31,7 +31,7 @@ def _ram_guard() -> None:
     available_gb = psutil.virtual_memory().available / 1024**3
     if available_gb < MIN_AVAILABLE_GB:
         raise RuntimeError(
-            f"не хватает RAM для реранкера: доступно {available_gb:.1f} ГБ, нужно ~{MIN_AVAILABLE_GB} ГБ"
+            f"Not enough RAM for the reranker: {available_gb:.1f} GB available, need ~{MIN_AVAILABLE_GB} GB"
         )
 
 

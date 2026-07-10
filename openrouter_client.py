@@ -15,6 +15,12 @@ class MalformedResponseError(Exception):
     """Raised when OpenRouter returns 200 OK but the body isn't shaped like a chat completion."""
 
 
+def _guard_yes(verdict: str) -> bool:
+    """The guard answers YES (en) or ДА (ru). Accept either so the guard is language-agnostic."""
+    v = verdict.strip().upper()
+    return v.startswith("YES") or v.startswith("ДА")
+
+
 async def _post(messages: list[dict], model: str) -> str:
     headers = {
         "Authorization": f"Bearer {config.OPENROUTER_API_KEY}",
@@ -150,7 +156,7 @@ async def is_adversarial(guard_prompt: str, text: str) -> bool:
             log.warning("Guard (local) failed after %.1fs, trying cloud fallback", loop.time() - t0)
         else:
             log.info("guard (local): %.1fs -> %r", loop.time() - t0, verdict.strip()[:10])
-            return verdict.strip().upper().startswith("ДА")
+            return _guard_yes(verdict)
 
     # Reached when: local model is off, OR the local guard failed and GUARD_CLOUD_FALLBACK is on.
     try:
@@ -159,7 +165,7 @@ async def is_adversarial(guard_prompt: str, text: str) -> bool:
         log.warning("Guard (cloud) failed after %.1fs, failing open", loop.time() - t0)
         return False
     log.info("guard (cloud): %.1fs -> %r", loop.time() - t0, verdict.strip()[:10])
-    return verdict.strip().upper().startswith("ДА")
+    return _guard_yes(verdict)
 
 
 async def describe_image(image_url: str, prompt: str) -> str:

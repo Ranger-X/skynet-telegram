@@ -3,7 +3,7 @@
 The dossier axis needs to bridge three name spaces: Telegram user_id (exact, what the bot knows),
 @username (what people type in /profile), and the display name the export stamps on every message
 (what actually appears inside window texts). Without the bridge the LLM gets windows full of
-«Алексей: ...» while being told the person is «brokenthreephaseswitchboard» — and honestly reports
+"Alexey: ..." while being told the person is "brokenthreephaseswitchboard" — and honestly reports
 it can't find any quotes (seen live). Built during JSON backfill; persisted next to the bot state.
 """
 

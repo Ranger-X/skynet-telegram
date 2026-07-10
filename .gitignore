@@ -30,3 +30,9 @@ vl_test2.txt
 
 # claude code harness internals
 .claude/
+
+# habr article draft (contains real chat nicknames — local only)
+HABR_DRAFT.md
+
+# per-chat language state (runtime; fresh clone defaults to English)
+lang_state.json

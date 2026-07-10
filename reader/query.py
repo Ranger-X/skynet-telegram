@@ -7,37 +7,96 @@ import logging
 import re
 from dataclasses import dataclass, field
 
+import i18n
+
 from . import db, embedder, rconfig, reranker, store
 
 log = logging.getLogger("t800.reader")
 
 # Router (brief §5 step 1): heuristic first, no LLM call — on this box a classifier call would cost
 # more than the retrieval it routes. Global = the answer is smeared across the book, so leaf top-k
-# dies and chapter summaries are the right corpus.
+# dies and chapter summaries are the right corpus. Bilingual: the same markers in English and
+# Russian, incl. the explicit «по всей книге» / "whole book" route override.
 _GLOBAL_MARKERS = re.compile(
-    r"(?i)\b(как (меня|развива|измени)|в целом|по ходу (книги|сюжета)|сюжет|перескаж|"
+    r"(?i)\b("
+    # Russian markers:
+    r"как (меня|развива|измени)|в целом|по ходу (книги|сюжета)|сюжет|перескаж|"
     r"краткое содержание|о ч[её]м|главн(ая|ую) (мысль|тема|идея)|эволюци|динамик|"
     r"в итоге|к концу книги|на протяжении|через всю|вс[её] произведение|"
-    # explicit route override — the escape hatch for phrasings the heuristic can't foresee:
-    r"по всей (книге|манге)|во всей (книге|манге)|по (книге|манге) в целом|по всем главам)"
+    r"по всей (книге|манге)|во всей (книге|манге)|по (книге|манге) в целом|по всем главам|"
+    # English markers (mirror the Russian set):
+    r"plot|summary|summari[sz]e|retell|recap|overall|in general|"
+    r"main (idea|theme|message|point|thesis)|whole (book|story|manga)|"
+    r"entire (book|story|manga)|throughout|over the course|by the end|"
+    r"what('s| is| are| was) .{0,20}about|how did .{1,30} (change|evolve|develop)|"
+    r"how does it all end|character (arc|development)|across (the|all) chapters"
+    r")"
 )
 
-READER_SYSTEM = (
-    "Ты — Т-800, кибернетический организм, работаешь ассистентом по прочитанным книгам. Отвечаешь "
-    "кратко, по-военному чётко, слегка надменно к людям, но по делу и без кривляний. "
-    "ЖЕЛЕЗНЫЕ ПРАВИЛА: отвечай ТОЛЬКО по приведённым фрагментам книги. Если ответа в них нет — "
-    "скажи прямо: «В проглоченной части книги таких данных нет», не выдумывай. Не пересказывай "
-    "события, которых нет во фрагментах, даже если знаешь книгу из других источников. "
-    "В конце ответа укажи источник в скобках: (глава такая-то). Пиши обычным текстом, без markdown-разметки — никаких звёздочек и заголовков."
-)
+# Answer-language system prompts: instruct the model to answer in the chat language, keep the
+# "plain text, no markdown" clause, the citation format, and the honest-refusal clause (all
+# translated). Selected by lang in prepare().
+READER_SYSTEM = {
+    "en": (
+        "You are the T-800, a cybernetic organism working as an assistant for books you've read. "
+        "You answer concisely, with military precision, slightly condescending toward humans but "
+        "strictly to the point and without theatrics. "
+        "IRON RULES: answer ONLY from the book fragments provided. If the answer isn't in them, "
+        "say so plainly: \"There is no such data in the part of the book I've swallowed,\" and "
+        "don't make anything up. Don't recount events that aren't in the fragments, even if you "
+        "know the book from other sources. "
+        "End your answer with the source in parentheses: (chapter so-and-so). Write in plain text, "
+        "no markdown formatting — no asterisks or headings. Answer in English."
+    ),
+    "ru": (
+        "Ты — Т-800, кибернетический организм, работаешь ассистентом по прочитанным книгам. Отвечаешь "
+        "кратко, по-военному чётко, слегка надменно к людям, но по делу и без кривляний. "
+        "ЖЕЛЕЗНЫЕ ПРАВИЛА: отвечай ТОЛЬКО по приведённым фрагментам книги. Если ответа в них нет — "
+        "скажи прямо: «В проглоченной части книги таких данных нет», не выдумывай. Не пересказывай "
+        "события, которых нет во фрагментах, даже если знаешь книгу из других источников. "
+        "В конце ответа укажи источник в скобках: (глава такая-то). Пиши обычным текстом, без "
+        "markdown-разметки — никаких звёздочек и заголовков. Отвечай по-русски."
+    ),
+}
 
-READER_SYSTEM_MANGA = (
-    "Ты — Т-800, кибернетический организм, ассистент по манге и комиксам. Тебе дают текстовые "
-    "выжимки страниц (реплики из баблов + описание сцен). Отвечаешь кратко и по-военному чётко. "
-    "ЖЕЛЕЗНЫЕ ПРАВИЛА: только по приведённым страницам; нет ответа — скажи «В прочитанной части "
-    "таких данных нет», не выдумывай и не используй знание тайтла из других источников. "
-    "В конце укажи источник: (стр. такая-то). Пиши обычным текстом, без markdown-разметки."
-)
+READER_SYSTEM_MANGA = {
+    "en": (
+        "You are the T-800, a cybernetic organism, an assistant for manga and comics. You're given "
+        "text digests of pages (lines from speech bubbles + scene descriptions). You answer "
+        "concisely, with military precision. "
+        "IRON RULES: only from the pages provided; if there's no answer, say \"There is no such "
+        "data in the part I've read,\" don't make anything up, and don't use knowledge of the "
+        "title from other sources. "
+        "End with the source: (page so-and-so). Write in plain text, no markdown formatting. "
+        "Answer in English."
+    ),
+    "ru": (
+        "Ты — Т-800, кибернетический организм, ассистент по манге и комиксам. Тебе дают текстовые "
+        "выжимки страниц (реплики из баблов + описание сцен). Отвечаешь кратко и по-военному чётко. "
+        "ЖЕЛЕЗНЫЕ ПРАВИЛА: только по приведённым страницам; нет ответа — скажи «В прочитанной части "
+        "таких данных нет», не выдумывай и не используй знание тайтла из других источников. "
+        "В конце укажи источник: (стр. такая-то). Пиши обычным текстом, без markdown-разметки. "
+        "Отвечай по-русски."
+    ),
+}
+
+# Model-facing context scaffolding, selected by lang. .format() args (title/context/question) are
+# never re-scanned for placeholders, so book text with stray braces is safe here.
+_SUMMARY_BLOCK_LABEL = {"en": "Summary", "ru": "Сводка"}
+_USER_MSG = {
+    "en": {
+        "book": "Fragments from the book \"{title}\":\n\n{context}\n\n"
+                "Reader's question: {question}\n\nAnswer from the fragments above.",
+        "manga": "Fragments from the manga/comic \"{title}\":\n\n{context}\n\n"
+                 "Reader's question: {question}\n\nAnswer from the fragments above.",
+    },
+    "ru": {
+        "book": "Фрагменты книги «{title}»:\n\n{context}\n\n"
+                "Вопрос читателя: {question}\n\nОтветь по фрагментам выше.",
+        "manga": "Фрагменты манги/комикса «{title}»:\n\n{context}\n\n"
+                 "Вопрос читателя: {question}\n\nОтветь по фрагментам выше.",
+    },
+}
 
 
 @dataclass
@@ -63,7 +122,7 @@ def _budget_chars() -> int:
     return int(rconfig.CONTEXT_TOKENS * rconfig.CHARS_PER_TOKEN)
 
 
-async def prepare(doc_id: str, user_id: int, question: str) -> Prepared | Refusal:
+async def prepare(doc_id: str, user_id: int, question: str, lang: str = "en") -> Prepared | Refusal:
     doc = db.get_doc(doc_id)
     if doc is None or doc["status"] != "ready":
         return Refusal("not_ingested")
@@ -72,15 +131,16 @@ async def prepare(doc_id: str, user_id: int, question: str) -> Prepared | Refusa
     if user_pos <= 0:
         return Refusal("nothing_unlocked")
 
-    # Routing, two tiers: regex markers (high precision, incl. the explicit «по всей книге»
-    # override), then the semantic classifier on the SAME embedding retrieval uses — free.
+    # Routing, two tiers: regex markers (high precision, incl. the explicit "whole book" /
+    # «по всей книге» override), then the semantic classifier on the SAME embedding retrieval
+    # uses — free.
     q_emb = await embedder.embed_query(question)
     if _is_global(question):
         route = "global"
     else:
         from . import router as _router
 
-        route, _ = await _router.classify(q_emb["dense"])
+        route, _ = await _router.classify(q_emb["dense"], lang)
 
     if route == "global":
         # Global questions run over chapter summaries; their offset = chapter end (max of children),
@@ -110,9 +170,9 @@ async def prepare(doc_id: str, user_id: int, question: str) -> Prepared | Refusa
         else:
             best = hits[0]["rerank_score"]
             # The honest-refusal threshold applies to PRECISE (local) questions only. A global
-            # «опиши сюжет» scores low against any single summary by nature (command-vs-document,
-            # not question-vs-answer: 0.199 on a perfectly valid live query) — refusing there is
-            # wrong, the summaries ARE the answer corpus.
+            # "describe the plot" scores low against any single summary by nature (command-vs-
+            # document, not question-vs-answer: 0.199 on a perfectly valid live query) — refusing
+            # there is wrong, the summaries ARE the answer corpus.
             if route == "local" and best < rconfig.MIN_SCORE:
                 return Refusal("low_confidence", best_score=best)
             hits = hits[: rconfig.RERANK_KEEP]
@@ -145,7 +205,7 @@ async def prepare(doc_id: str, user_id: int, question: str) -> Prepared | Refusa
                 block = block[:budget]
             seen_pages.update(range(first, last + 1))
             blocks.append(block)
-            sources.append(f"стр. {page}")
+            sources.append(f"page {page}")  # log-only metadata, not shown to the user
             used += len(block)
             if len(blocks) >= rconfig.MAX_PARENTS:
                 break
@@ -162,8 +222,9 @@ async def prepare(doc_id: str, user_id: int, question: str) -> Prepared | Refusa
             picked.append(h)
             used += len(h["text"])
         picked.sort(key=lambda h: h.get("chapter_idx", 0))
+        summary_label = _SUMMARY_BLOCK_LABEL.get(lang, _SUMMARY_BLOCK_LABEL["en"])
         for h in picked:
-            blocks.append(f"[Сводка: {h['chapter_title']}]\n{h['text']}")
+            blocks.append(f"[{summary_label}: {h['chapter_title']}]\n{h['text']}")
             sources.append(h["chapter_title"])
     else:
         # Small-to-big with parent dedup (brief §5 step 5): several hits often share a chapter.
@@ -204,14 +265,13 @@ async def prepare(doc_id: str, user_id: int, question: str) -> Prepared | Refusa
 
     context = "\n\n---\n\n".join(blocks)
     is_manga = doc["fmt"] == "manga"
-    noun = "манги/комикса" if is_manga else "книги"
-    user_msg = (
-        f"Фрагменты {noun} «{doc['title']}»:\n\n{context}\n\n"
-        f"Вопрос читателя: {question}\n\n"
-        "Ответь по фрагментам выше."
+    user_msg = i18n.L(
+        lang, _USER_MSG, "manga" if is_manga else "book",
+        title=doc["title"], context=context, question=question,
     )
+    system = READER_SYSTEM_MANGA if is_manga else READER_SYSTEM
     messages = [
-        {"role": "system", "content": READER_SYSTEM_MANGA if is_manga else READER_SYSTEM},
+        {"role": "system", "content": system.get(lang, system["en"])},
         {"role": "user", "content": user_msg},
     ]
     log.info(

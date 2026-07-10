@@ -2,8 +2,8 @@
 
 Queue order is cheapest-first: voices (whisper, LLM-free, seconds each) -> photos (12B vision,
 ~half a minute each, politeness-gated) -> videos/animations (frames + 12B, the slowest). Every
-item becomes its own memory point («артём кинул фото (03.07): два кота дерутся за шаверму») —
-windows are never rewritten, so nothing gets re-embedded.
+item becomes its own memory point ("artem shared a photo (03.07): two cats fighting over shawarma")
+— windows are never rewritten, so nothing gets re-embedded.
 
 Resumable: point ids derive from the media path; already-stored ids are skipped. The whole run
 lives inside the bot process (embedded Qdrant) and yields to live chat between LLM calls exactly
@@ -22,6 +22,7 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 import config
+import i18n
 from qdrant_client import models
 
 from reader import embedder
@@ -37,14 +38,36 @@ PHOTO_MAX_SIDE = 640      # dossier descriptions don't need full-res; keeps enco
 VIDEO_FRAMES = 5
 DESCRIBE_MAX_TOKENS = 120
 
+# Vision-grinder prompts: single English version by design — they instruct a vision model and the
+# resulting text feeds a multilingual embedder, so they are NOT per-chat-language.
 PHOTO_PROMPT = (
-    "Опиши это изображение одним-двумя предложениями по-русски: что происходит/что изображено. "
-    "Если на картинке есть читаемый текст (мем, скриншот) — процитируй его суть. Без вступлений."
+    "Describe this image in one or two sentences: what is happening / what is shown. "
+    "If there is readable text (a meme, a screenshot), quote its gist. No preamble."
 )
 VIDEO_PROMPT = (
-    "Это кадры одного видео по порядку. Опиши одним-двумя предложениями, что в нём происходит. "
-    "Без вступлений."
+    "These are frames from a single video, in order. Describe in one or two sentences what happens "
+    "in it. No preamble."
 )
+
+# Progress / status strings shown to the user, selected by the chat's language.
+STR = {
+    "en": {
+        "queue": "Media queued: {counts} (already digested: {done}). Starting.",
+        "aborted_embedder": "Grind cancelled: the embedder didn't load ({exc}). Free up RAM and retry.",
+        "eta_mins": "~{mins} min left",
+        "eta_estimating": "estimating pace",
+        "progress": "Media: {done}/{total} digested ({failed} failed), {eta}.",
+        "summary": "Media grind finished in {mins} min: {done} digested, {failed} failed.",
+    },
+    "ru": {
+        "queue": "Медиа в очереди: {counts} (уже усвоено: {done}). Начинаю.",
+        "aborted_embedder": "Грайнд отменён: эмбеддер не загрузился ({exc}). Освободи RAM и повтори.",
+        "eta_mins": "осталось ~{mins} мин",
+        "eta_estimating": "оцениваю темп",
+        "progress": "Медиа: {done}/{total} усвоено (ошибок {failed}), {eta}.",
+        "summary": "Медиа-грайнд завершён за {mins} мин: {done} усвоено, {failed} сбоев.",
+    },
+}
 
 
 def _media_point_id(chat_id: int, media_path: str) -> str:
@@ -152,6 +175,7 @@ async def run_grind(
     progress: Callable[[str], Awaitable[None]],
     kinds: tuple[str, ...] = ("voice", "photo", "video", "animation"),
 ) -> str:
+    lang = i18n.get_lang(chat_id)
     export_root = Path(export_dir)
     messages = await asyncio.to_thread(parse_export, export_dir)
 
@@ -166,15 +190,15 @@ async def run_grind(
     order = {"voice": 0, "photo": 1, "video": 2, "animation": 3}
     queue.sort(key=lambda m: (order.get(m.kind, 9), m.ts))
     counts = {k: sum(1 for m in queue if m.kind == k) for k in kinds}
-    await progress(f"Медиа в очереди: {counts} (уже усвоено: {len(done_ids)}). Начинаю.")
+    await progress(i18n.L(lang, STR, "queue", counts=counts, done=len(done_ids)))
 
     # Warm the embedder BEFORE anything else: it's the smallest model in the chain, but if its
     # RAM guard refuses, every transcription/description would be wasted work (seen live: whisper
     # loaded first, ate the last GB, embedder bounced, all results died at the store step).
     try:
-        await embedder.embed_texts(["прогрев"])
+        await embedder.embed_texts(["warmup"])
     except Exception as exc:
-        await progress(f"Грайнд отменён: эмбеддер не загрузился ({exc}). Освободи RAM и повтори.")
+        await progress(i18n.L(lang, STR, "aborted_embedder", exc=exc))
         return "aborted: embedder unavailable"
 
     t0 = time.monotonic()
@@ -189,19 +213,20 @@ async def run_grind(
                 tr = await transcribe.transcribe(str(path))
                 if not tr:
                     raise RuntimeError("empty transcript")
-                text = f"{m.author} (голосовое, {stamp}): {tr}"
+                # Point text is index-internal (embedded, multilingual embedder) — single English form.
+                text = f"{m.author} (voice, {stamp}): {tr}"
             elif m.kind == "photo":
                 jpeg = await asyncio.to_thread(_jpeg_of, path)
                 desc = await _describe_images([jpeg], PHOTO_PROMPT)
-                caption = f" Подпись: {m.text}" if m.text else ""
-                text = f"{m.author} кинул фото ({stamp}): {desc}{caption}"
+                caption = f" Caption: {m.text}" if m.text else ""
+                text = f"{m.author} shared a photo ({stamp}): {desc}{caption}"
             else:  # video | animation
                 frames = await asyncio.to_thread(_frames_of, path, VIDEO_FRAMES)
                 if not frames:
                     raise RuntimeError("no frames")
                 desc = await _describe_images(frames, VIDEO_PROMPT)
-                noun = "гифку" if m.kind == "animation" else "видео"
-                text = f"{m.author} кинул {noun} ({stamp}): {desc}"
+                noun = "gif" if m.kind == "animation" else "video"
+                text = f"{m.author} shared a {noun} ({stamp}): {desc}"
             await _store_point(m, chat_id, text)
             done += 1
         except Exception:
@@ -212,12 +237,16 @@ async def run_grind(
             last_tick = time.monotonic()
             if done:
                 rate = done / max(0.1, time.monotonic() - t0)
-                eta = f"осталось ~{max(1, int((len(queue) - done - failed) / rate) // 60)} мин"
+                eta = i18n.L(lang, STR, "eta_mins",
+                             mins=max(1, int((len(queue) - done - failed) / rate) // 60))
             else:
-                eta = "оцениваю темп"  # no completions yet — a rate of 0 would print garbage ETA
-            await progress(f"Медиа: {done}/{len(queue)} усвоено (ошибок {failed}), {eta}.")
+                # no completions yet — a rate of 0 would print garbage ETA
+                eta = i18n.L(lang, STR, "eta_estimating")
+            await progress(i18n.L(lang, STR, "progress",
+                                  done=done, total=len(queue), failed=failed, eta=eta))
 
-    summary = f"Медиа-грайнд завершён за {(time.monotonic() - t0) / 60:.0f} мин: {done} усвоено, {failed} сбоев."
+    summary = i18n.L(lang, STR, "summary",
+                     mins=f"{(time.monotonic() - t0) / 60:.0f}", done=done, failed=failed)
     log.info(summary)  # progress() only edits the Telegram message — the log needs its own line
     await progress(summary)
     return summary
