@@ -126,7 +126,7 @@ async def _search(topic: str, lang: str) -> list[dict]:
     def _run() -> list[dict]:
         found: dict[str, dict] = {}
         with DDGS() as ddgs:
-            region = "ru-ru" if lang == "ru" else "wt-wt"
+            region = config.search_region(lang)
             for angle in ANGLES[lang]:
                 q = f"{topic} {angle}".strip()
                 try:

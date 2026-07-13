@@ -120,7 +120,22 @@ HORN_INTERVAL_SECONDS = int(os.environ.get("HORN_INTERVAL_SECONDS", "0"))
 
 # How often (seconds) T-800 drops a random recent news headline into the group. 0 = off by default.
 NEWS_INTERVAL_SECONDS = int(os.environ.get("NEWS_INTERVAL_SECONDS", "0"))
-NEWS_FEED_URL = os.environ.get("NEWS_FEED_URL", "https://news.google.com/rss?hl=ru&gl=RU&ceid=RU:ru")
+# The news feed follows the chat's language — an English chat shouldn't get Russian headlines.
+# An explicit NEWS_FEED_URL overrides both (use it to plug in any RSS feed you like).
+_NEWS_FEED_OVERRIDE = os.environ.get("NEWS_FEED_URL", "").strip()
+NEWS_FEED_URLS = {
+    "en": os.environ.get("NEWS_FEED_URL_EN", "https://news.google.com/rss?hl=en-US&gl=US&ceid=US:en"),
+    "ru": os.environ.get("NEWS_FEED_URL_RU", "https://news.google.com/rss?hl=ru&gl=RU&ceid=RU:ru"),
+}
+
+
+def news_feed_url(lang: str) -> str:
+    return _NEWS_FEED_OVERRIDE or NEWS_FEED_URLS.get(lang, NEWS_FEED_URLS["en"])
+
+
+def search_region(lang: str) -> str:
+    """DuckDuckGo region for /search and /research — 'wt-wt' is the no-region (worldwide) default."""
+    return "ru-ru" if lang == "ru" else "wt-wt"
 
 SEARCH_RESULT_COUNT = 5  # results fetched per /search query
 

@@ -1405,10 +1405,11 @@ async def horn_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await update.message.reply_text(i18n.L(lang, STR, "horn_failed"))
 
 
-async def fetch_recent_news_title() -> str | None:
-    """Pull a real headline from an RSS feed — the model never invents the news itself."""
+async def fetch_recent_news_title(lang: str) -> str | None:
+    """Pull a real headline from an RSS feed — the model never invents the news itself. The feed
+    follows the chat's language."""
     async with httpx.AsyncClient(timeout=20) as client:
-        response = await client.get(config.NEWS_FEED_URL)
+        response = await client.get(config.news_feed_url(lang))
         response.raise_for_status()
 
     feed = feedparser.parse(response.content)
@@ -1419,15 +1420,15 @@ async def fetch_recent_news_title() -> str | None:
 
 
 async def new_chat(context: ContextTypes.DEFAULT_TYPE, chat_id: int) -> bool:
+    lang = i18n.get_lang(chat_id)
     try:
-        title = await fetch_recent_news_title()
+        title = await fetch_recent_news_title(lang)
     except Exception:
         log.exception("Failed to fetch news feed")
         return False
     if not title:
         return False
 
-    lang = i18n.get_lang(chat_id)
     prompt = i18n.L(lang, PROMPTS, "news_prompt", title=title)
     convo = history.setdefault(chat_id, [])
     llm_messages = build_llm_messages(convo, lang, extra=prompt)
@@ -1464,8 +1465,10 @@ async def new_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await update.message.reply_text(i18n.L(lang, STR, "news_failed"))
 
 
-def _web_search(query: str) -> list[dict]:
-    return DDGS().text(query, max_results=config.SEARCH_RESULT_COUNT, region="ru-ru")
+def _web_search(query: str, lang: str) -> list[dict]:
+    return DDGS().text(
+        query, max_results=config.SEARCH_RESULT_COUNT, region=config.search_region(lang)
+    )
 
 
 async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1480,7 +1483,9 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
 
     try:
-        results = await asyncio.wait_for(asyncio.to_thread(_web_search, query), timeout=config.REPLY_TIMEOUT_SECONDS)
+        results = await asyncio.wait_for(
+            asyncio.to_thread(_web_search, query, lang), timeout=config.REPLY_TIMEOUT_SECONDS
+        )
     except Exception:
         log.exception("Web search failed")
         await update.message.reply_text(i18n.L(lang, STR, "search_down"))
