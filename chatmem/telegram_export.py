@@ -213,7 +213,7 @@ def parse_export(export_dir: str | Path) -> list[ExportMessage]:
             if "default" not in classes:
                 continue  # service messages carry no dialogue value
             try:
-                msg_id = int(node.get("id", "message-0").split("-")[-1])
+                msg_id = int(node.get("id", "message0").removeprefix("message"))
             except ValueError:
                 continue
 

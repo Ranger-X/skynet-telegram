@@ -1619,18 +1619,19 @@ HELP_TEXT = {
         "/memgrind [voice|photo|video] — chew through the archive's media (owner)\n"
         "/memwipe — wipe the chat's memory (owner)\n"
         "\n"
-        "— Long-reader —\n"
-        "Send a book as a file (FB2/EPUB) — I answer questions about it strictly UP TO your bookmark: "
-        "spoilers are physically excluded.\n"
-        "/pos chapter 5 · read chapter 7 · 40% · whole book — set a bookmark\n"
-        "/ask <question> — a question about the active book\n"
-        "/chapters — list of chapters\n"
-        "/books and /book <n> — the library\n"
-        "/tier medium — chapter summaries for \"about the book as a whole\" questions\n"
-        "\n"
+        "— Other —\n"
         "/lang en | ru — switch the bot's language\n"
         "/help — this summary"
     ),
+    # "— Long-reader —\n"
+    # "Send a book as a file (FB2/EPUB) — I answer questions about it strictly UP TO your bookmark: "
+    # "spoilers are physically excluded.\n"
+    # "/pos chapter 5 · read chapter 7 · 40% · whole book — set a bookmark\n"
+    # "/ask <question> — a question about the active book\n"
+    # "/chapters — list of chapters\n"
+    # "/books and /book <n> — the library\n"
+    # "/tier medium — chapter summaries for \"about the book as a whole\" questions\n"
+
     "ru": (
         "ДИРЕКТИВЫ T-800\n"
         "\n"
@@ -1652,18 +1653,19 @@ HELP_TEXT = {
         "/memgrind [voice|photo|video] — дожевать медиа архива (владелец)\n"
         "/memwipe — стереть память чата (владелец)\n"
         "\n"
-        "— Лонг-ридер —\n"
-        "Пришли книгу файлом (FB2/EPUB) — отвечаю на вопросы по ней строго ДО твоей закладки: "
-        "спойлеры исключены физически.\n"
-        "/pos глава 5 · прочитал главу 7 · 40% · вся книга — поставить закладку\n"
-        "/ask <вопрос> — вопрос по активной книге\n"
-        "/chapters — список глав\n"
-        "/books и /book <n> — библиотека\n"
-        "/tier medium — сводки глав для вопросов «по книге в целом»\n"
-        "\n"
+        "— Прочее —\n"
         "/lang en | ru — переключить язык бота\n"
         "/help — эта сводка"
     ),
+    # "— Лонг-ридер —\n"
+    # "Пришли книгу файлом (FB2/EPUB) — отвечаю на вопросы по ней строго ДО твоей закладки: "
+    # "спойлеры исключены физически.\n"
+    # "/pos глава 5 · прочитал главу 7 · 40% · вся книга — поставить закладку\n"
+    # "/ask <вопрос> — вопрос по активной книге\n"
+    # "/chapters — список глав\n"
+    # "/books и /book <n> — библиотека\n"
+    # "/tier medium — сводки глав для вопросов «по книге в целом»\n"
+
 }
 
 
@@ -1801,7 +1803,7 @@ def main() -> None:
     app.add_handler(MessageHandler(filters.ANIMATION, handle_animation))
     app.add_handler(MessageHandler(filters.VIDEO | filters.VIDEO_NOTE, handle_video))
     app.add_handler(MessageHandler(filters.Sticker.ALL, handle_sticker))
-    register_reader_handlers(app)  # long-reader: book files, /ask, /pos, /books, /tier
+    # register_reader_handlers(app)  # long-reader: book files, /ask, /pos, /books, /tier
     register_chatmem_handlers(app)  # chat memory: /memload, /memstat
     if config.TEASE_INTERVAL_SECONDS > 0:
         app.job_queue.run_repeating(

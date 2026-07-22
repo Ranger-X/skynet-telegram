@@ -40,9 +40,9 @@ STR = {
     },
     "ru": {
         "parsed": "распарсено {n} сообщений ({span}), окон: {win} (p50 {p50} знаков). Эмбеддинг...",
-        "progress": "память: {done}/{total} окон (~{secs} с осталось)",
+        "progress": "память: {done}/{total} окон (~{secs} сек осталось)",
         "summary": (
-            "Архив чата усвоен за {secs} с: {win} окон диалога, "
+            "Архив чата усвоен за {secs} сек: {win} окон диалога, "
             "всего точек памяти: {total}. Медиа ({media} шт.) будут дожёваны отдельно."
         ),
     },
@@ -66,6 +66,7 @@ async def run(
                 log.warning("backfill progress callback failed", exc_info=True)
 
     messages = await asyncio.to_thread(parse_export, export_dir)
+    log.info("messages: %s", messages)
     # id -> display name bridge (JSON exports carry from_id) — /profile depends on it.
     names.save_names(chat_id, {m.author_id: m.author for m in messages if m.author_id})
     windows = build_windows(messages, chat_id)
