@@ -1831,13 +1831,13 @@ def main() -> None:
             first=config.NEWS_INTERVAL_SECONDS,
             name="news_job",
         )
-    if config.USE_LOCAL_MODEL:
-        app.job_queue.run_repeating(
-            llama_watchdog,
-            interval=config.LLAMA_WATCHDOG_INTERVAL,
-            first=config.LLAMA_WATCHDOG_INTERVAL,
-            name="llama_watchdog",
-        )
+    # if config.USE_LOCAL_MODEL:
+    #     app.job_queue.run_repeating(
+    #         llama_watchdog,
+    #         interval=config.LLAMA_WATCHDOG_INTERVAL,
+    #         first=config.LLAMA_WATCHDOG_INTERVAL,
+    #         name="llama_watchdog",
+    #     )
 
     async def _preload_embedder(context: ContextTypes.DEFAULT_TYPE) -> None:
         """Load bge-m3 while RAM is at its freshest (right after startup) instead of lazily at the
@@ -1853,8 +1853,17 @@ def main() -> None:
 
     app.job_queue.run_once(_preload_embedder, 15, name="embedder_preload")
 
-    log.info("T-800 online, polling started.")
-    app.run_polling(allowed_updates=Update.ALL_TYPES)
+    # Python 3.14+ requires explicit event loop creation in main thread
+    import asyncio
+
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
+    try:
+        log.info("T-800 online, polling started.")
+        app.run_polling(allowed_updates=Update.ALL_TYPES)
+    finally:
+        loop.close()
 
 
 if __name__ == "__main__":
