@@ -1,0 +1,21 @@
+giterminismConfigVersion: 1
+config:
+  goTemplateRendering: # The rules for the Go-template functions to be able to pass build context to the release
+    allowEnvVariables:
+    - CI
+    - /CI_.+/
+    # allowUncommittedFiles:
+    # - "base_images.yml"
+  secrets:
+    allowEnvVariables:
+    - CI_JOB_TOKEN
+    - CI_COMMIT_TAG
+    allowValueIds:
+    - SOURCE_REPO
+    - GOPROXY
+  stapel:
+    mount:
+      allowBuildDir: true
+      allowFromPaths:
+        # - ~/go-pkg-cache
+        - .git
