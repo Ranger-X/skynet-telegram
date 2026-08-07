@@ -10,88 +10,40 @@ build:
       keepEssentialWerfLabels: true
       removeLabels:
         - /.*/
----
 
+---
 image: {{ $.ImageName }}
 final: true
 from: python:3.14-alpine
 git:
   - add: /
     to: /app
+    owner: 1000
+    group: 1000
     stageDependencies:
+      install:
+        - "requirements.txt"
       setup:
         - "**/*"
-secrets:
-  - env: CI_JOB_TOKEN
-# mount:
-# - fromPath: .git
-#   to: /build/.git
+shell:
+  beforeInstall:
+    # Install apk packages required for building Python dependencies
+    - apk add --no-cache gcc musl-dev linux-headers libxml2-dev libxslt-dev libffi-dev
+    - useradd -m -u 1000 -s /bin/bash appuser
+    # Install uv
+    - pip install uv
+  install:
+    - uv venv /app/.venv
+    - export PATH="/app/.venv/bin:$PATH"
+    - cd /app
+    # Install Python dependencies from requirements.txt
+    - uv pip install -r requirements.txt
+    - exit 6
+  setup:
+    # Set working directory
+    - cd /app
 imageSpec:
   config:
-      entrypoint: ["/managed-valkey-agent"]
-      user: {{ $.Root.D8_UID }}:{{ $.Root.D8_UID }}
-      workingDir: /
-shell:
-  install:
-    # - export CI_COMMIT_TAG=$(cat /run/secrets/CI_COMMIT_TAG)
-    # for development builds we need to install delve go-debugger
-    - |
-      if [[ -z "${CI_COMMIT_TAG}" ]]; then
-        echo "Installing delve go-debugger..."
-        CGO_ENABLED=0 go install -ldflags "-s -w -extldflags '-static'" github.com/go-delve/delve/cmd/dlv@latest
-        mkdir /build/artifact
-        mv /go/bin/dlv /build/artifact
-        chmod +x /build/artifact/dlv
-      fi
-  setup:
-    - git config --global --add safe.directory /build
-    - |
-      export CI_SERVER_HOST={{ env "CI_SERVER_HOST" }}
-      export CI_COMMIT_REF_NAME={{ env "CI_COMMIT_REF_NAME" "" }}
-
-      export GOPRIVATE=${CI_SERVER_HOST}
-
-      # if we build in CI pipeline, apply git private repo patch
-      if [[ -n "${CI_COMMIT_REF_NAME}" ]]; then
-        JOB_TOKEN=$(cat /run/secrets/CI_JOB_TOKEN)
-        git config --global url."https://gitlab-ci-token:$JOB_TOKEN@${CI_SERVER_HOST}/".insteadOf "https://${CI_SERVER_HOST}/"
-      else
-        echo "Patching for local build"
-        mkdir -p /etc/ssh
-        cat <<EOF > /etc/ssh/ssh_config
-        Host *
-          StrictHostKeyChecking no
-          UserKnownHostsFile=/dev/null
-      EOF
-        git config --global url."git@${CI_SERVER_HOST}:".insteadOf "https://${CI_SERVER_HOST}/"
-      fi
-    - git config --global -l
-    - cd /build
-    - SUBMODULE_COMMIT=$(git rev-parse HEAD:images/{{ $.ImageName }}/{{ $.ImageName }})
-    - SUBMODULE_COMMIT_DATE=$(git log --pretty=format:'%ad' -- images/{{ $.ImageName }}/{{ $.ImageName }} | head -1)
-    - BUILD_DATE=$(date +"%Y-%m-%dT%H:%M:%SZ" --utc)
-    - |
-      # if tag is specified, then build our agent for release
-      if [[ -n "${CI_COMMIT_TAG}" ]]; then
-        echo "Building our agent for release (commit: ${SUBMODULE_COMMIT} submodule commit date: ${SUBMODULE_COMMIT_DATE})"
-        CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o artifact/managed-valkey-agent -ldflags="-s -w -X version.GitCommit=${SUBMODULE_COMMIT} -X version.VersionMetadata=${VERSION_METADATA} -X version.BuildDate=${BUILD_DATE}" ./cmd/main.go
-      else
-        # development build (without optimizations, etc.)
-        echo "Building our agent for development (commit: ${SUBMODULE_COMMIT} submodule commit date: ${SUBMODULE_COMMIT_DATE})"
-        CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o artifact/managed-valkey-agent -gcflags "all=-N -l" -ldflags="-X version.GitCommit=${SUBMODULE_COMMIT} -X version.VersionMetadata=${VERSION_METADATA} -X version.BuildDate=${BUILD_DATE}" ./cmd/main.go
-      fi
-
-    - chown -R {{ $.Root.D8_UID }}:{{ $.Root.D8_UID }} artifact/managed-valkey-agent
-    - chmod 0755 artifact/managed-valkey-agent
-
----
-image: {{ $.ImageName }}
-from: {{ index $.Images "base/distroless" }}
-# make from AltLinux for debug purposes
-# from: builder/alt
-final: true
-import:
-  - from: {{ $.ImageName }}-artifact
-    add: /build/artifact/
-    to: /
-    before: install
+    entrypoint: ["uv", "run", "main.py"]
+    user: 1000:1000
+    workingDir: /app

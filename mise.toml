@@ -19,7 +19,41 @@ uv pip install -r requirements.txt
 touch .venv/.mise-synced
 """
 
+# Vars can be shared between tasks like environment variables,
+# but they are not passed as environment variables to the scripts
+[vars]
+project_name = 'skynet'
+registry_port = '5001'
+
 [tasks.start]
 description = "Run the development server"
 depends = ["sync-deps"] # <-- Mise checks for requirements.txt updates first!
 run = "uv run main.py"
+
+[tasks.run-docker-registry]
+description = "Run docker registry locally"
+# https://distribution.github.io/distribution/about/configuration/
+run = """
+docker stop registry || docker run --name=registry --rm --detach -v registry:/var/lib/registry --publish={{ vars.registry_port }}:5000 -e REGISTRY_STORAGE_DELETE_ENABLED=true registry:2
+"""
+
+[tasks.stop-docker-registry]
+description = "Stop docker registry"
+run = "docker stop registry || true"
+
+[tasks.local-build]
+description = "Build docker image locally"
+depends = ["run-docker-registry"]
+      # WERF_REPO: "{{ .LOCAL_REGISTRY_HOST }}:{{ .LOCAL_REGISTRY_PORT }}/{{ .MODULE_NAME }}"
+      # # some "releases-only" registry
+      # WERF_FINAL_REPO: "{{ .LOCAL_REGISTRY_HOST }}:{{ .LOCAL_REGISTRY_PORT }}/modules/{{ .MODULE_NAME }}"
+      # # skip TLS registry verify
+      # # WERF_SKIP_TLS_VERIFY_REGISTRY: "true"
+      # # also you need add something like '{ "insecure-registries":["10.0.0.222:5000"] }' to /etc/docker/daemon.json and restart docker daemon
+      # # add custom tag to local builded images
+      # WERF_ADD_CUSTOM_TAG_1: '%image_safe_slug%-{{ .BRANCH_SAFE }}'
+
+env = { WERF_REPO = '127.0.0.1:{{ vars.registry_port }}/{{ vars.project_name }}', WERF_INSECURE_REGISTRY = 'true', WERF_LOG_TIME = 'true', WERF_FINAL_IMAGES_ONLY = 'true' }
+run = """
+werf build -S :local --dev --log-verbose=true --introspect-error --save-build-report --build-report-path images_tags_werf.json
+"""
