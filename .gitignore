@@ -4,6 +4,7 @@ bot.log
 bot.log.*
 state.json
 state.json.bak
+images_tags_werf.json
 
 # private chat data: quotes, member names/ids, reading positions, vector store
 reader.db
