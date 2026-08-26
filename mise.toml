@@ -5,8 +5,13 @@ uv = "latest"
 [settings]
 python.uv_venv_auto = "create|source"
 
+[env]
+# Force uv to always recognize .venv as the project environment
+UV_PROJECT_ENVIRONMENT = ".venv"
+UV_PYTHON = { value = "{{ tools.python.path }}", tools = true }
+
 [tasks.post_install]
-run = "uv venv && uv pip install -r requirements.txt"
+run = "uv venv --allow-existing && uv pip install -r requirements.txt --python .venv"
 
 [tasks.sync-deps]
 description = "Sync requirements.txt via uv only if the file changed"
@@ -15,7 +20,8 @@ sources = ["requirements.txt"]
 # An empty file mise touches to remember when it last synced successfully
 outputs = [".venv/.mise-synced"]
 run = """
-uv pip install -r requirements.txt
+uv venv --allow-existing
+uv pip install -r requirements.txt --python .venv
 touch .venv/.mise-synced
 """
 
@@ -28,7 +34,7 @@ registry_port = '5001'
 [tasks.start]
 description = "Run the development server"
 depends = ["sync-deps"] # <-- Mise checks for requirements.txt updates first!
-run = "uv run main.py"
+run = "uv run --python .venv --system-certs main.py"
 
 [tasks.run-docker-registry]
 description = "Run docker registry locally"
